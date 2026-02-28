@@ -8,51 +8,38 @@
  *   - dropBuildPath: string (optional)
  */
 
-import { readFileSync, existsSync, statSync, mkdirSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { execSync } from 'node:child_process';
+import { readFileSync, existsSync, statSync, mkdirSync, rmSync, createWriteStream } from 'node:fs';
+import { basename, join, dirname } from 'node:path';
+import archiver from 'archiver';
 import { getServer, getAuth, getAppConfig } from '../lib/config.js';
 
 interface UploadArgs {
-    localPath: string;
-    appId: string;
-    appName?: string;
-    serverBuildPath?: string;
-}
-
-function parseArgs(args: string[]): UploadArgs {
-    let localPath = '';
-    let appId = '';
-    let appName = '';
-    let serverBuildPath = '';
-
-    for (let i = 0; i < args.length; i++) {
-        if (args[i] === '--app' || args[i] === '-a') {
-            appId = args[i + 1];
-            i++;
-        } else if (args[i] === '--build-path' || args[i] === '-b') {
-            serverBuildPath = args[i + 1];
-            i++;
-        } else if (!args[i].startsWith('-')) {
-            localPath = args[i];
-        }
-    }
-
-    return { localPath, appId, appName, serverBuildPath: serverBuildPath || undefined };
+    path: string;
+    app?: string;
+    buildPath?: string;
 }
 
 async function createZip(sourcePath: string, zipName: string): Promise<string> {
-    const zipPath = join(sourcePath, '..', `${zipName}.zip`);
+    const zipPath = join(dirname(sourcePath), `${zipName}.zip`);
 
     console.log('   Creating zip archive...');
-    execSync(`cd "${sourcePath}" && powershell -Command "Compress-Archive -Path * -DestinationPath '${zipPath}' -Force"`, {
-        stdio: 'inherit'
+
+    await new Promise<void>((resolve, reject) => {
+        const output = createWriteStream(zipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        archive.on('error', (err) => reject(err));
+
+        archive.pipe(output);
+        archive.directory(sourcePath, false);
+        archive.finalize();
     });
 
     return zipPath;
 }
 
-export async function upload(args: string[]): Promise<void> {
+export async function upload(args: UploadArgs): Promise<void> {
     // Get auth token
     const auth = getAuth();
     const server = await getServer();
@@ -63,8 +50,8 @@ export async function upload(args: string[]): Promise<void> {
         process.exit(1);
     }
 
-    const argsParsed = parseArgs(args);
-    let { localPath, appId, appName, serverBuildPath } = argsParsed;
+    let { path: localPath, app: appId, buildPath: serverBuildPath } = args;
+    let appName = localPath;
 
     // If no appId from args, try config file (use path as app name)
     if (!appId && localPath) {

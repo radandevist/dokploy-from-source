@@ -50,10 +50,7 @@ async function askForToken(): Promise<string> {
     });
 }
 
-export async function auth(args: string[]): Promise<void> {
-    // Get token from command argument
-    let token = args[0] || '';
-
+export async function auth(token?: string): Promise<void> {
     // If no token provided, ask interactively
     if (!token) {
         token = await askForToken();

@@ -16,14 +16,25 @@
     "dev": "tsx watch src/index.ts",
     "link": "npm link"
   },
-  "keywords": ["dokploy", "cli", "deployment", "upload"],
+  "keywords": [
+    "dokploy",
+    "cli",
+    "deployment",
+    "upload"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "formdata-polyfill": "^4.0.10"
+    "archiver": "^7.0.1",
+    "formdata-polyfill": "^4.0.10",
+    "tar": "^7.5.9",
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/node": "^20.0.0",
+    "@types/tar": "^6.1.13",
+    "@types/yargs": "^17.0.35",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   }
