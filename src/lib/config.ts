@@ -17,7 +17,7 @@ export interface Config {
 
 export interface AppConfig {
     appId: string;
-    localPath?: string;
+    localPath: string;
     serverBuildPath?: string;
 }
 
@@ -49,7 +49,6 @@ export async function loadConfig(): Promise<Config | null> {
 
     const configPaths = [
         join(cwd, 'dfs.config.js'),
-        join(cwd, 'config.js'),
     ];
 
     for (const configPath of configPaths) {

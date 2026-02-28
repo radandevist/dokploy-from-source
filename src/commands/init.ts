@@ -1,5 +1,5 @@
 /**
- * Init command - creates a config.js file in the current directory
+ * Init command - creates a dfs.config.js file in the current directory
  */
 
 import { writeFileSync, existsSync } from 'node:fs';
@@ -22,8 +22,8 @@ export default {
             // Get the app ID from your Dokploy dashboard URL
             appId: 'YOUR_APP_ID_HERE',
 
-            // Optional: local build folder (default: './dist')
-            // localPath: './dist',
+            // Local build folder (required)
+            localPath: './dist',
 
             // Optional: server build path (where app is served on server)
             // serverBuildPath: '/',
@@ -43,10 +43,10 @@ export function init(args: string[]): void {
 
     writeFileSync(configPath, CONFIG_TEMPLATE);
 
-    console.log('✅ Created config.js');
+    console.log('✅ Created dfs.config.js');
     console.log('');
     console.log('Next steps:');
-    console.log('1. Edit config.js - add your server URL and app ID');
+    console.log('1. Edit dfs.config.js - add your app ID');
     console.log('2. Run: dfs auth YOUR_TOKEN');
-    console.log('3. Run: dfs upload myapp');
+    console.log('3. Run: dfs up myapp');
 }

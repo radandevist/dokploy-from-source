@@ -18,13 +18,11 @@ npm install
 npm link
 
 # Setup
-dfs init                    # Creates config.js
+dfs init                    # Creates dfs.config.js
 dfs auth YOUR_TOKEN         # Set your API token
 
 # Use
-dfs upload ./dist --app YOUR_APP_ID
-# Or use app name from config
-dfs upload myapp
+dfs up myapp
 ```
 
 ## Installation
@@ -45,7 +43,7 @@ npm link
 
 ### `dfs init`
 
-Creates a `config.js` file in the current directory with default settings.
+Creates a `dfs.config.js` file in the current directory with default settings.
 
 ```bash
 dfs init
@@ -54,14 +52,15 @@ dfs init
 This creates:
 
 ```javascript
-// config.js
+// dfs.config.js
 export default {
     server: 'https://your-dokploy-server.com',
 
     apps: {
         myapp: {
             appId: 'YOUR_APP_ID_HERE',
-            // buildPath: '/dist', // optional
+            localPath: './dist',        // optional: local build folder
+            serverBuildPath: '/',       // optional: server path
         },
     },
 };
@@ -77,10 +76,6 @@ dfs auth YOUR_TOKEN
 
 # Or enter interactively
 dfs auth
-
-# Or from environment variable
-export DOKPLOY_TOKEN=YOUR_TOKEN
-dfs auth
 ```
 
 To get your API token:
@@ -88,32 +83,32 @@ To get your API token:
 2. Navigate to **Settings → Profile**
 3. Click **Generate** to create an API token
 
-### `dfs upload`
+### `dfs up` (alias: `dfs upload`)
 
 Uploads a build to Dokploy and triggers deployment.
 
 ```bash
-# Upload a directory (will be archived automatically)
-dfs upload ./dist --app YOUR_APP_ID
+# Use app name from config
+dfs up myapp
 
-# Or use app name from config.js
-dfs upload myapp
+# Or with explicit path and app ID
+dfs up ./dist --app YOUR_APP_ID
 
 # Upload a pre-made archive
-dfs upload ./build.tar.gz --app YOUR_APP_ID
+dfs up ./build.zip --app YOUR_APP_ID
 
-# Specify build path if needed
-dfs upload ./dist --app YOUR_APP_ID --build-path /app
+# Specify server build path
+dfs up ./dist --app YOUR_APP_ID --build-path /app
 ```
 
 ## Configuration
 
-### config.js
+### dfs.config.js
 
-Create a `config.js` file in your project directory:
+Create a `dfs.config.js` file in your project directory:
 
 ```javascript
-// config.js
+// dfs.config.js
 export default {
     // Your Dokploy server URL
     server: 'https://your-dokploy-server.com',
@@ -123,11 +118,13 @@ export default {
         // Short name -> config
         myapp: {
             appId: 'YOUR_APP_ID',
-            buildPath: '/dist',
+            localPath: './dist',         // optional: local build folder (default: ./dist)
+            serverBuildPath: '/',       // optional: server path where app is served
         },
 
         api: {
             appId: 'ANOTHER_APP_ID',
+            localPath: './publish',      // for .NET apps
         },
     },
 };
@@ -136,9 +133,17 @@ export default {
 Then use short names:
 
 ```bash
-dfs upload myapp    # uses config.apps.myapp
-dfs upload api      # uses config.apps.api
+dfs up myapp    # uses config.apps.myapp
+dfs up api      # uses config.apps.api
 ```
+
+### Config Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `appId` | string | Your Dokploy application ID (required) |
+| `localPath` | string | Local build folder path (default: `./dist`) |
+| `serverBuildPath` | string | Server path where app is served (optional) |
 
 ### Auth Storage
 
@@ -148,7 +153,7 @@ Your API token is stored in:
 ~/.config/dfs/auth.json
 ```
 
-This keeps your token out of your project files and environment variables.
+This keeps your token out of your project files.
 
 ## Getting Your App ID
 
@@ -166,13 +171,6 @@ https://your-dokploy-server.com/dashboard/project/.../services/application/YOUR_
 
 The uploaded files are stored in `/var/lib/dokploy/applications/{appName}/code/` on your Dokploy server.
 
-## Options
-
-| Option | Alias | Description |
-|--------|-------|-------------|
-| `--app` | `-a` | Your Dokploy application ID |
-| `--build-path` | `-b` | Path to build directory inside the archive |
-
 ## Examples
 
 ### React/Vite App
@@ -183,9 +181,7 @@ cd my-app
 npm run build
 
 # Upload to Dokploy
-dfs upload ./dist --app YOUR_APP_ID
-# or
-dfs upload myapp   # if configured in config.js
+dfs up myapp
 ```
 
 ### .NET App
@@ -195,8 +191,8 @@ dfs upload myapp   # if configured in config.js
 cd apps/api
 dotnet publish -c Release -o ./publish
 
-# Upload to Dokploy
-dfs upload ./publish --app YOUR_APP_ID --build-path /
+# Upload to Dokploy (with custom localPath in config)
+dfs up api
 ```
 
 ## Troubleshooting
@@ -221,7 +217,7 @@ You don't have permission to deploy this application. Check your user permission
 
 If your app doesn't start after upload:
 
-1. The **build path** is correct (use `--build-path` if needed)
+1. The **serverBuildPath** is correct (use `--build-path` if needed)
 2. Your **start command** is configured in Dokploy
 3. The **port** matches what Dokploy expects
 

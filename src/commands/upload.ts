@@ -8,20 +8,22 @@
  *   - dropBuildPath: string (optional)
  */
 
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
+import { readFileSync, existsSync, statSync, mkdirSync, rmSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getServer, getAuth, getAppConfig } from '../lib/config.js';
 
 interface UploadArgs {
     localPath: string;
     appId: string;
+    appName?: string;
     serverBuildPath?: string;
 }
 
 function parseArgs(args: string[]): UploadArgs {
     let localPath = '';
     let appId = '';
+    let appName = '';
     let serverBuildPath = '';
 
     for (let i = 0; i < args.length; i++) {
@@ -36,14 +38,14 @@ function parseArgs(args: string[]): UploadArgs {
         }
     }
 
-    return { localPath, appId, serverBuildPath: serverBuildPath || undefined };
+    return { localPath, appId, appName, serverBuildPath: serverBuildPath || undefined };
 }
 
-async function createZip(sourcePath: string): Promise<string> {
-    const zipPath = sourcePath + '.zip';
+async function createZip(sourcePath: string, zipName: string): Promise<string> {
+    const zipPath = join(sourcePath, '..', `${zipName}.zip`);
 
     console.log('   Creating zip archive...');
-    execSync(`cd "${sourcePath}" && powershell -Command "Compress-Archive -Path * -DestinationPath '../${zipPath}' -Force"`, {
+    execSync(`cd "${sourcePath}" && powershell -Command "Compress-Archive -Path * -DestinationPath '${zipPath}' -Force"`, {
         stdio: 'inherit'
     });
 
@@ -62,29 +64,30 @@ export async function upload(args: string[]): Promise<void> {
     }
 
     const argsParsed = parseArgs(args);
-    let { localPath, appId, serverBuildPath } = argsParsed;
+    let { localPath, appId, appName, serverBuildPath } = argsParsed;
 
     // If no appId from args, try config file (use path as app name)
     if (!appId && localPath) {
         const config = await getAppConfig(localPath);
         if (config) {
+            appName = localPath; // Use the argument as app name
             appId = config.appId;
             serverBuildPath = config.serverBuildPath;
-            localPath = config.localPath || './dist'; // Default to ./dist
+            localPath = config.localPath;
         }
     }
 
     if (!localPath) {
         console.error('❌ Error: Path is required');
-        console.log('   Usage: dfs upload <path> --app <app-id>');
-        console.log('   Example: dfs upload ./dist --app uqsJFzeXlkZhERc4f28O4');
-        console.log('   Or use app name from config: dfs upload myapp');
+        console.log('   Usage: dfs up <path> --app <app-id>');
+        console.log('   Example: dfs up ./dist --app uqsJFzeXlkZhERc4f28O4');
+        console.log('   Or use app name from config: dfs up myapp');
         process.exit(1);
     }
 
     if (!appId) {
         console.error('❌ Error: Application ID is required (--app)');
-        console.log('   Usage: dfs upload <path> --app <app-id>');
+        console.log('   Usage: dfs up <path> --app <app-id>');
         process.exit(1);
     }
 
@@ -103,7 +106,9 @@ export async function upload(args: string[]): Promise<void> {
     const stat = statSync(localPath);
 
     if (stat.isDirectory()) {
-        filePath = await createZip(localPath);
+        // Use app name for zip file, default to 'app' if not provided
+        const name = appName || 'app';
+        filePath = await createZip(localPath, name);
         console.log(`   Archive: ${filePath}`);
     }
 
@@ -170,9 +175,8 @@ export async function upload(args: string[]): Promise<void> {
     console.log('   Deployment triggered automatically.');
 
     // Clean up temp archive if we created one
-    if (filePath !== localPath) {
-        const fs = await import('node:fs');
-        fs.unlinkSync(filePath);
+    if (stat.isDirectory()) {
+        rmSync(filePath);
         console.log('   Cleaned up temporary archive.');
     }
 }

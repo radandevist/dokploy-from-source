@@ -19,7 +19,8 @@ const args = process.argv.slice(2);
 const command = args[0];
 
 switch (command) {
-    case 'upload': {
+    case 'upload':
+    case 'up': {
         const uploadArgs = args.slice(1);
         upload(uploadArgs).catch((error) => {
             console.error('❌ Upload failed:', error);
@@ -49,9 +50,9 @@ dfs - dokploy-from-source
 CLI for deploying local builds to Dokploy without using Git.
 
 Usage:
-  dfs upload <path> --app <app-id>   Upload and deploy
+  dfs upload <path> --app <app-id>   Upload and deploy (alias: up)
   dfs auth <token>                  Set your API token
-  dfs init                          Create config.js template
+  dfs init                          Create dfs.config.js template
 
 Configuration:
   dfs looks for config.js in the current directory.

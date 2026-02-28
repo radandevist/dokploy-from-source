@@ -1,21 +1,12 @@
 /**
  * Auth command - stores and validates the API token
+ *
+ * Usage:
+ *   dfs auth YOUR_TOKEN
+ *   dfs auth           # interactive
  */
 
-import { setAuth, getAuth, loadConfig } from '../lib/config.js';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-const CONFIG_DIR = join(homedir(), '.config', 'dfs');
-const AUTH_FILE = join(CONFIG_DIR, 'auth.json');
-
-function readTokenFromFile(filePath: string): string | null {
-    if (existsSync(filePath)) {
-        return readFileSync(filePath, 'utf-8').trim();
-    }
-    return null;
-}
+import { setAuth, loadConfig } from '../lib/config.js';
 
 async function testToken(token: string, server: string): Promise<boolean> {
     try {
@@ -32,9 +23,9 @@ async function testToken(token: string, server: string): Promise<boolean> {
             return true;
         }
 
-        // Also try with empty body for some APIs
+        // 400 often means valid token but wrong payload
         if (response.status === 400) {
-            return true; // 400 often means valid token but wrong payload
+            return true;
         }
 
         return false;
@@ -60,43 +51,10 @@ async function askForToken(): Promise<string> {
 }
 
 export async function auth(args: string[]): Promise<void> {
+    // Get token from command argument
     let token = args[0] || '';
 
-    // If no token provided, check for environment variable
-    if (!token) {
-        token = process.env.DOKPLOY_TOKEN || '';
-    }
-
-    // If still no token, try to read from common dokploy config locations
-    if (!token) {
-        const tokenFileLocations = [
-            join(homedir(), '.config', 'dokploy', 'token'),
-            join(homedir(), '.dokploy', 'token'),
-            join(homedir(), '.config', 'dokploy', 'config.json'),
-        ];
-
-        for (const loc of tokenFileLocations) {
-            if (existsSync(loc)) {
-                if (loc.endsWith('token')) {
-                    const fileToken = readTokenFromFile(loc);
-                    if (fileToken) {
-                        token = fileToken;
-                        break;
-                    }
-                } else if (loc.endsWith('config.json')) {
-                    try {
-                        const config = JSON.parse(readFileSync(loc, 'utf-8'));
-                        token = config.token || config.apiToken || '';
-                        if (token) break;
-                    } catch {
-                        // Ignore parse errors
-                    }
-                }
-            }
-        }
-    }
-
-    // If still no token, ask interactively
+    // If no token provided, ask interactively
     if (!token) {
         token = await askForToken();
     }
@@ -132,11 +90,11 @@ export async function auth(args: string[]): Promise<void> {
         }
         console.log('✅ Token is valid!');
     } else {
-        console.log('⚠️  No server configured in config.js - skipping validation');
+        console.log('⚠️  No server configured in dfs.config.js - skipping validation');
         console.log('   Run "dfs init" first to configure your server.');
     }
 
-    // Save the token
+    // Save the token to ~/.config/dfs/auth.json
     setAuth(token);
     console.log('');
     console.log('✅ Authentication configured!');
