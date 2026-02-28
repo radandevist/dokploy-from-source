@@ -17,6 +17,8 @@ interface UploadArgs {
     path: string;
     app?: string;
     buildPath?: string;
+    token?: string;
+    server?: string;
 }
 
 async function createZip(sourcePath: string, zipName: string): Promise<string> {
@@ -41,8 +43,8 @@ async function createZip(sourcePath: string, zipName: string): Promise<string> {
 
 export async function upload(args: UploadArgs): Promise<void> {
     // Get auth token
-    const auth = getAuth();
-    const server = await getServer();
+    const auth = getAuth(args.token);
+    const server = await getServer(args.server);
 
     if (!auth?.token) {
         console.error('❌ Error: Not authenticated');

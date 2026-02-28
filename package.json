@@ -6,8 +6,16 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
   "bin": {
     "dfs": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    }
   },
   "scripts": {
     "clean": "rm -rf dist",

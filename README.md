@@ -195,6 +195,82 @@ dotnet publish -c Release -o ./publish
 dfs up api
 ```
 
+## Programmatic API
+
+Use `dokploy-from-source` as a library in your IaC pipelines.
+
+### Installation
+
+```bash
+npm install dokploy-from-source
+```
+
+### Usage
+
+```javascript
+import { configure, upload } from 'dokploy-from-source';
+```
+
+### Configuration
+
+Set global overrides that take precedence over `dfs.config.js` and `auth.json`:
+
+```javascript
+configure({
+    server: 'https://dokploy.example.com',
+    token: 'your-api-token'
+});
+```
+
+### Upload
+
+**Option 1: Use app name from config**
+
+```javascript
+await upload({ appName: 'myapp' });
+```
+
+**Option 2: Pass all options programmatically**
+
+```javascript
+await upload({
+    path: './dist',
+    appId: 'YOUR_APP_ID',
+    buildPath: '/app'
+});
+```
+
+**Option 3: Mixed (use config for some, override others)**
+
+```javascript
+await upload({
+    appName: 'myapp',           // looks up appId and localPath from config
+    token: 'override-token',     // overrides the stored token
+    buildPath: '/custom-path'    // overrides config
+});
+```
+
+### Full API Reference
+
+| Function | Description |
+|----------|-------------|
+| `configure(options)` | Set global server/token overrides |
+| `upload(options)` | Upload a build |
+| `getConfigOverrides()` | Get current configuration |
+| `resetConfigure()` | Clear configuration overrides |
+
+### Upload Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `path` | string | Local file/folder path |
+| `appName` | string | App name from dfs.config.js |
+| `appId` | string | Dokploy app ID |
+| `localPath` | string | Local build folder |
+| `buildPath` | string | Server build path |
+| `token` | string | API token override |
+| `server` | string | Server URL override |
+
 ## Troubleshooting
 
 ### "Not authenticated"

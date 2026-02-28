@@ -3,6 +3,7 @@
  *
  * Configuration is loaded from config.js file in current directory.
  * Auth is stored in ~/.config/dfs/auth.json
+ * Programmatic overrides can be set via configure()
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -25,8 +26,15 @@ export interface Auth {
     token: string;
 }
 
+export interface ConfigOverrides {
+    server?: string;
+    token?: string;
+}
+
 const CONFIG_DIR = join(homedir(), '.config', 'dfs');
 const AUTH_FILE = join(CONFIG_DIR, 'auth.json');
+
+let configOverrides: ConfigOverrides = {};
 
 function ensureConfigDir() {
     if (!existsSync(CONFIG_DIR)) {
@@ -34,7 +42,32 @@ function ensureConfigDir() {
     }
 }
 
-export async function getServer(): Promise<string> {
+/**
+ * Set programmatic configuration overrides
+ * These take precedence over dfs.config.js and auth.json
+ */
+export function configure(options: ConfigOverrides): void {
+    configOverrides = { ...configOverrides, ...options };
+}
+
+/**
+ * Get current configuration overrides
+ */
+export function getConfig(): ConfigOverrides {
+    return { ...configOverrides };
+}
+
+/**
+ * Clear configuration overrides
+ */
+export function resetConfig(): void {
+    configOverrides = {};
+}
+
+export async function getServer(override?: string): Promise<string> {
+    if (override || configOverrides.server) {
+        return override || configOverrides.server!;
+    }
     const config = await loadConfig();
     if (!config?.server) {
         console.error('❌ Error: server not configured in config.js');
@@ -66,7 +99,12 @@ export async function loadConfig(): Promise<Config | null> {
     return null;
 }
 
-export function getAuth(): Auth | null {
+export function getAuth(override?: string): Auth | null {
+    // Override takes precedence
+    if (override || configOverrides.token) {
+        return { token: override || configOverrides.token! };
+    }
+
     ensureConfigDir();
 
     if (existsSync(AUTH_FILE)) {
