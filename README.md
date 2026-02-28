@@ -18,7 +18,7 @@ npm install
 npm link
 
 # Setup
-dfs init                    # Creates dfs.config.js
+dfs init                    # Creates dfs.config.cjs
 dfs auth YOUR_TOKEN         # Set your API token
 
 # Use
@@ -43,7 +43,7 @@ npm link
 
 ### `dfs init`
 
-Creates a `dfs.config.js` file in the current directory with default settings.
+Creates a `dfs.config.cjs` file in the current directory with default settings.
 
 ```bash
 dfs init
@@ -52,8 +52,8 @@ dfs init
 This creates:
 
 ```javascript
-// dfs.config.js
-export default {
+// dfs.config.cjs
+module.exports = {
     server: 'https://your-dokploy-server.com',
 
     apps: {
@@ -103,13 +103,13 @@ dfs up ./dist --app YOUR_APP_ID --build-path /app
 
 ## Configuration
 
-### dfs.config.js
+### dfs.config.cjs
 
-Create a `dfs.config.js` file in your project directory:
+Create a `dfs.config.cjs` file in your project directory:
 
 ```javascript
-// dfs.config.js
-export default {
+// dfs.config.cjs
+module.exports = {
     // Your Dokploy server URL
     server: 'https://your-dokploy-server.com',
 
@@ -154,6 +154,8 @@ Your API token is stored in:
 ```
 
 This keeps your token out of your project files.
+
+The CLI uses the `x-api-key` header for authentication (consistent across upload and auth commands).
 
 ## Getting Your App ID
 
@@ -213,7 +215,7 @@ import { configure, upload } from 'dokploy-from-source';
 
 ### Configuration
 
-Set global overrides that take precedence over `dfs.config.js` and `auth.json`:
+Set global overrides that take precedence over `dfs.config.cjs` and `auth.json`:
 
 ```javascript
 configure({
@@ -264,7 +266,7 @@ await upload({
 | Option | Type | Description |
 |--------|------|-------------|
 | `path` | string | Local file/folder path |
-| `appName` | string | App name from dfs.config.js |
+| `appName` | string | App name from dfs.config.cjs |
 | `appId` | string | Dokploy app ID |
 | `localPath` | string | Local build folder |
 | `buildPath` | string | Server build path |

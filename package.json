@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "start": "node ./dist/index.js",
     "dev": "tsx watch src/index.ts",
@@ -34,14 +34,11 @@
   "license": "MIT",
   "dependencies": {
     "archiver": "^7.0.1",
-    "formdata-polyfill": "^4.0.10",
-    "tar": "^7.5.9",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
     "@types/node": "^20.0.0",
-    "@types/tar": "^6.1.13",
     "@types/yargs": "^17.0.35",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"

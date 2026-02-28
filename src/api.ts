@@ -10,17 +10,31 @@
  *   configure({ server: 'https://dokploy.example.com', token: 'xxx' });
  *
  *   // Upload build
- *   await upload({ path: './dist', appName: 'myapp' });
+ *   await upload({ path: './dist', appId: 'my-app-id' });
  */
 
-import { configure as configureApi, getConfig, resetConfig } from './lib/config.js';
-import { upload as doUpload } from './commands/upload.js';
-import { getAppConfig } from './lib/config.js';
+import {
+    configure as configureApi,
+    getConfig,
+    resetConfig,
+    getServer,
+    setAuth,
+    loadConfig,
+    getAppConfig,
+} from './core/config.js';
+import { upload as doUpload, uploadWithConfig } from './core/upload.js';
+import {
+    DfsError,
+    ConfigError,
+    AuthError,
+    UploadError,
+} from './core/errors.js';
 
-// ============================================================================
-// Types
-// ============================================================================
+// Re-export types
+export type { UploadResult } from './core/upload.js';
+export type { Config, AppConfig, Auth, ConfigOverrides } from './core/config.js';
 
+// ConfigureOptions interface for the public API
 export interface ConfigureOptions {
     /** Dokploy server URL (e.g., https://dokploy.example.com) */
     server?: string;
@@ -28,6 +42,7 @@ export interface ConfigureOptions {
     token?: string;
 }
 
+// UploadOptions interface for the public API
 export interface UploadOptions {
     /**
      * Local path to upload (file or directory)
@@ -35,7 +50,7 @@ export interface UploadOptions {
      */
     path?: string;
     /**
-     * Application name to look up from dfs.config.js
+     * Application name to look up from dfs.config.cjs
      * When provided, appId and localPath are read from config
      */
     appName?: string;
@@ -58,19 +73,13 @@ export interface UploadOptions {
     server?: string;
 }
 
-export interface UploadResult {
-    success: boolean;
-    message: string;
-}
-
-// ============================================================================
-// Public API
-// ============================================================================
+// Re-export error types
+export { DfsError, ConfigError, AuthError, UploadError } from './core/errors.js';
 
 /**
  * Configure programmatic overrides
  *
- * Values passed here take precedence over dfs.config.js and auth.json
+ * Values passed here take precedence over dfs.config.cjs and auth.json
  */
 export function configure(options: ConfigureOptions): void {
     configureApi(options);
@@ -80,7 +89,7 @@ export function configure(options: ConfigureOptions): void {
  * Get current configuration overrides
  */
 export function getConfigOverrides(): ConfigureOptions {
-    return getConfig() as ConfigureOptions;
+    return getConfig();
 }
 
 /**
@@ -96,42 +105,45 @@ export function resetConfigure(): void {
  * @param options - Upload configuration
  * @returns Upload result
  */
-export async function upload(options: UploadOptions): Promise<UploadResult> {
-    let { path, appId, localPath, buildPath, token, server } = options;
-    const appName = options.appName;
+export async function upload(options: UploadOptions): Promise<{ success: boolean; message: string }> {
+    const { path, appId, localPath, buildPath, token, server, appName } = options;
 
     // If appName provided, look up config
     if (appName) {
         const appConfig = await getAppConfig(appName);
         if (!appConfig) {
-            throw new Error(`App "${appName}" not found in dfs.config.js`);
+            throw new ConfigError(
+                `App "${appName}" not found in dfs.config.cjs`,
+                'APP_NOT_FOUND'
+            );
         }
-        appId = appConfig.appId;
-        localPath = localPath || appConfig.localPath;
-        buildPath = buildPath || appConfig.serverBuildPath;
+
+        return uploadWithConfig(appName, {
+            path: localPath || appConfig.localPath,
+            app: appId || appConfig.appId,
+            buildPath: buildPath || appConfig.serverBuildPath,
+            token,
+            server,
+        });
     }
 
-    if (!localPath && !path) {
-        throw new Error('path or localPath is required');
-    }
-
-    // Use path if localPath not set
     const resolvedPath = localPath || path;
-
     if (!resolvedPath) {
-        throw new Error('path is required');
+        throw new UploadError('path or localPath is required', 400, undefined, 'MISSING_PATH');
     }
 
-    await doUpload({
+    if (!appId) {
+        throw new UploadError('appId is required', 400, undefined, 'MISSING_APP_ID');
+    }
+
+    return doUpload({
         path: resolvedPath,
         app: appId,
         buildPath,
         token,
         server,
     });
-
-    return {
-        success: true,
-        message: 'Upload successful! Deployment triggered.',
-    };
 }
+
+// Re-export config functions
+export { getServer, setAuth, loadConfig, getAppConfig };
