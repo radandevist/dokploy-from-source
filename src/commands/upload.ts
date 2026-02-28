@@ -8,7 +8,8 @@
  *   - dropBuildPath: string (optional)
  */
 
-import { readFileSync, existsSync, statSync, mkdirSync, rmSync, createWriteStream } from 'node:fs';
+import { readFile, stat, rm, access } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import archiver from 'archiver';
 import { getServer, getAuth, getAppConfig } from '../lib/config.js';
@@ -43,7 +44,7 @@ async function createZip(sourcePath: string, zipName: string): Promise<string> {
 
 export async function upload(args: UploadArgs): Promise<void> {
     // Get auth token
-    const auth = getAuth(args.token);
+    const auth = await getAuth(args.token);
     const server = await getServer(args.server);
 
     if (!auth?.token) {
@@ -81,7 +82,9 @@ export async function upload(args: UploadArgs): Promise<void> {
     }
 
     // Check if path exists
-    if (!existsSync(localPath)) {
+    try {
+        await access(localPath);
+    } catch {
         console.error(`❌ Error: Path does not exist: ${localPath}`);
         process.exit(1);
     }
@@ -92,9 +95,9 @@ export async function upload(args: UploadArgs): Promise<void> {
 
     // Create zip archive if path is a directory
     let filePath = localPath;
-    const stat = statSync(localPath);
+    const pathStat = await stat(localPath);
 
-    if (stat.isDirectory()) {
+    if (pathStat.isDirectory()) {
         // Use app name for zip file, default to 'app' if not provided
         const name = appName || 'app';
         filePath = await createZip(localPath, name);
@@ -104,7 +107,7 @@ export async function upload(args: UploadArgs): Promise<void> {
     console.log('   Uploading...');
 
     // Read file
-    const fileBuffer = readFileSync(filePath);
+    const fileBuffer = await readFile(filePath);
 
     // Create multipart form data
     const boundary = '----FormBoundary' + Math.random().toString(36).substring(2);
@@ -164,8 +167,8 @@ export async function upload(args: UploadArgs): Promise<void> {
     console.log('   Deployment triggered automatically.');
 
     // Clean up temp archive if we created one
-    if (stat.isDirectory()) {
-        rmSync(filePath);
+    if (pathStat.isDirectory()) {
+        await rm(filePath);
         console.log('   Cleaned up temporary archive.');
     }
 }

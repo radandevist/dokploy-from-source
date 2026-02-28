@@ -92,7 +92,7 @@ export async function auth(token?: string): Promise<void> {
     }
 
     // Save the token to ~/.config/dfs/auth.json
-    setAuth(token);
+    await setAuth(token);
     console.log('');
     console.log('✅ Authentication configured!');
     console.log('');

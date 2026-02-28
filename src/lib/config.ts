@@ -6,10 +6,11 @@
  * Programmatic overrides can be set via configure()
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 
 export interface Config {
     server: string;
@@ -36,9 +37,11 @@ const AUTH_FILE = join(CONFIG_DIR, 'auth.json');
 
 let configOverrides: ConfigOverrides = {};
 
-function ensureConfigDir() {
-    if (!existsSync(CONFIG_DIR)) {
-        mkdirSync(CONFIG_DIR, { recursive: true });
+async function ensureConfigDir(): Promise<void> {
+    try {
+        await access(CONFIG_DIR);
+    } catch {
+        await mkdir(CONFIG_DIR, { recursive: true });
     }
 }
 
@@ -99,31 +102,27 @@ export async function loadConfig(): Promise<Config | null> {
     return null;
 }
 
-export function getAuth(override?: string): Auth | null {
+export async function getAuth(override?: string): Promise<Auth | null> {
     // Override takes precedence
     if (override || configOverrides.token) {
         return { token: override || configOverrides.token! };
     }
 
-    ensureConfigDir();
+    await ensureConfigDir();
 
-    if (existsSync(AUTH_FILE)) {
-        try {
-            const content = readFileSync(AUTH_FILE, 'utf-8');
-            return JSON.parse(content);
-        } catch {
-            return null;
-        }
+    try {
+        const content = await readFile(AUTH_FILE, 'utf-8');
+        return JSON.parse(content);
+    } catch {
+        return null;
     }
-
-    return null;
 }
 
-export function setAuth(token: string): void {
-    ensureConfigDir();
+export async function setAuth(token: string): Promise<void> {
+    await ensureConfigDir();
 
     const auth: Auth = { token };
-    writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2));
+    await writeFile(AUTH_FILE, JSON.stringify(auth, null, 2));
 
     console.log('✅ Auth token saved to ~/.config/dfs/auth.json');
 }
