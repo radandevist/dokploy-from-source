@@ -1,0 +1,178 @@
+/**
+ * Upload command - uploads a build to Dokploy
+ *
+ * API: POST /trpc/application.dropDeployment
+ * Body: multipart/form-data with:
+ *   - zip: File (binary)
+ *   - applicationId: string
+ *   - dropBuildPath: string (optional)
+ */
+
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
+import { execSync } from 'node:child_process';
+import { getServer, getAuth, getAppConfig } from '../lib/config.js';
+
+interface UploadArgs {
+    localPath: string;
+    appId: string;
+    serverBuildPath?: string;
+}
+
+function parseArgs(args: string[]): UploadArgs {
+    let localPath = '';
+    let appId = '';
+    let serverBuildPath = '';
+
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--app' || args[i] === '-a') {
+            appId = args[i + 1];
+            i++;
+        } else if (args[i] === '--build-path' || args[i] === '-b') {
+            serverBuildPath = args[i + 1];
+            i++;
+        } else if (!args[i].startsWith('-')) {
+            localPath = args[i];
+        }
+    }
+
+    return { localPath, appId, serverBuildPath: serverBuildPath || undefined };
+}
+
+async function createZip(sourcePath: string): Promise<string> {
+    const zipPath = sourcePath + '.zip';
+
+    console.log('   Creating zip archive...');
+    execSync(`cd "${sourcePath}" && powershell -Command "Compress-Archive -Path * -DestinationPath '../${zipPath}' -Force"`, {
+        stdio: 'inherit'
+    });
+
+    return zipPath;
+}
+
+export async function upload(args: string[]): Promise<void> {
+    // Get auth token
+    const auth = getAuth();
+    const server = await getServer();
+
+    if (!auth?.token) {
+        console.error('❌ Error: Not authenticated');
+        console.log('   Run: dfs auth YOUR_TOKEN');
+        process.exit(1);
+    }
+
+    const argsParsed = parseArgs(args);
+    let { localPath, appId, serverBuildPath } = argsParsed;
+
+    // If no appId from args, try config file (use path as app name)
+    if (!appId && localPath) {
+        const config = await getAppConfig(localPath);
+        if (config) {
+            appId = config.appId;
+            serverBuildPath = config.serverBuildPath;
+            localPath = config.localPath || './dist'; // Default to ./dist
+        }
+    }
+
+    if (!localPath) {
+        console.error('❌ Error: Path is required');
+        console.log('   Usage: dfs upload <path> --app <app-id>');
+        console.log('   Example: dfs upload ./dist --app uqsJFzeXlkZhERc4f28O4');
+        console.log('   Or use app name from config: dfs upload myapp');
+        process.exit(1);
+    }
+
+    if (!appId) {
+        console.error('❌ Error: Application ID is required (--app)');
+        console.log('   Usage: dfs upload <path> --app <app-id>');
+        process.exit(1);
+    }
+
+    // Check if path exists
+    if (!existsSync(localPath)) {
+        console.error(`❌ Error: Path does not exist: ${localPath}`);
+        process.exit(1);
+    }
+
+    console.log(`📤 Uploading build to Dokploy...`);
+    console.log(`   Local path: ${localPath}`);
+    console.log(`   App ID: ${appId}`);
+
+    // Create zip archive if path is a directory
+    let filePath = localPath;
+    const stat = statSync(localPath);
+
+    if (stat.isDirectory()) {
+        filePath = await createZip(localPath);
+        console.log(`   Archive: ${filePath}`);
+    }
+
+    console.log('   Uploading...');
+
+    // Read file
+    const fileBuffer = readFileSync(filePath);
+
+    // Create multipart form data
+    const boundary = '----FormBoundary' + Math.random().toString(36).substring(2);
+
+    const parts: Buffer[] = [];
+
+    // Add applicationId field
+    parts.push(Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="applicationId"\r\n\r\n` +
+        `${appId}\r\n`
+    ));
+
+    // Add dropBuildPath field if provided (server-side build path)
+    if (serverBuildPath) {
+        parts.push(Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="dropBuildPath"\r\n\r\n` +
+            `${serverBuildPath}\r\n`
+        ));
+    }
+
+    // Add zip file
+    const fileName = basename(filePath);
+    parts.push(Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="zip"; filename="${fileName}"\r\n` +
+        `Content-Type: application/zip\r\n\r\n`
+    ));
+
+    // Add file content
+    parts.push(fileBuffer);
+    parts.push(Buffer.from('\r\n'));
+
+    // Close boundary
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+
+    const response = await fetch(`${server}/api/trpc/application.dropDeployment`, {
+        method: 'POST',
+        headers: {
+            'x-api-key': auth.token,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body: body,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`❌ Upload failed: ${response.status} ${response.statusText}`);
+        console.error(`   Error: ${errorText}`);
+        process.exit(1);
+    }
+
+    console.log('✅ Upload successful!');
+    console.log('   Deployment triggered automatically.');
+
+    // Clean up temp archive if we created one
+    if (filePath !== localPath) {
+        const fs = await import('node:fs');
+        fs.unlinkSync(filePath);
+        console.log('   Cleaned up temporary archive.');
+    }
+}

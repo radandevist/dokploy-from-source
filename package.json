@@ -1,0 +1,30 @@
+{
+  "name": "dokploy-from-source",
+  "version": "1.0.0",
+  "description": "CLI for deploying local builds to Dokploy without Git",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "dfs": "./dist/index.js"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "start": "node ./dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "link": "npm link"
+  },
+  "keywords": ["dokploy", "cli", "deployment", "upload"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "formdata-polyfill": "^4.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
