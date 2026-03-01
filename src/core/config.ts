@@ -433,11 +433,18 @@ export async function saveBuildType(
         );
     }
 
-    // Build payload dynamically per build type - only include fields when explicitly provided
-    // Let Dokploy apply its own defaults for omitted fields
+    // Build payload dynamically per build type
+    // NOTE: Dokploy's API requires all fields to be present (schema bug), so we send
+    // defaults for dockerfile fields even when not using dockerfile build type
     const json: Record<string, unknown> = {
         applicationId: appId,
         buildType,
+        // These are required by Dokploy's API schema even for non-dockerfile builds
+        dockerfile: '',
+        dockerContextPath: '.',
+        dockerBuildStage: '',
+        herokuVersion: '',
+        railpackVersion: '',
     };
 
     // Type-safe extraction based on discriminated union
