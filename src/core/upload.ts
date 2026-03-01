@@ -183,9 +183,11 @@ export async function upload(args: UploadArgs): Promise<UploadResult> {
     // Validate and sanitize upload parameters
     validateUploadParams(appId, serverBuildPath);
 
-    // Get authentication and server
-    const auth = await getAuth(token);
+    // Get server URL first (needed for token lookup)
     const serverUrl = await getServer(server);
+
+    // Get authentication (pass server URL for per-server token lookup)
+    const auth = await getAuth(token, serverUrl);
 
     // Validate path
     await validatePath(localPath);

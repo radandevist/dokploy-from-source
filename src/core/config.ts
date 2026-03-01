@@ -29,6 +29,14 @@ export interface Auth {
     token: string;
 }
 
+/**
+ * Per-server token storage
+ * Format: { "servers": { "https://server.com": "token", ... } }
+ */
+export interface AuthStore {
+    servers: Record<string, string>;
+}
+
 export interface ConfigOverrides {
     server?: string;
     token?: string;
@@ -76,7 +84,7 @@ export function resetConfig(): void {
 /**
  * Normalize server URL - remove trailing slashes
  */
-function normalizeServerUrl(server: string): string {
+export function normalizeServerUrl(server: string): string {
     return server.replace(/\/+$/, '');
 }
 
@@ -162,9 +170,11 @@ export async function loadConfig(): Promise<Config | null> {
 /**
  * Get authentication token
  *
+ * @param override - Optional token override
+ * @param server - Server URL to look up token for (required for per-server storage)
  * @throws {AuthError} If token is required but not found
  */
-export async function getAuth(override?: string): Promise<Auth> {
+export async function getAuth(override?: string, server?: string): Promise<Auth> {
     // Override takes precedence
     if (override || configOverrides.token) {
         return { token: override || configOverrides.token! };
@@ -174,23 +184,107 @@ export async function getAuth(override?: string): Promise<Auth> {
 
     try {
         const content = await readFile(AUTH_FILE, 'utf-8');
-        return JSON.parse(content);
-    } catch {
+        const parsed = JSON.parse(content);
+
+        // Validate parsed shape: must be a non-null object with servers
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new AuthError(
+                'Invalid auth.json format. Run "dfs auth YOUR_TOKEN" to recreate.',
+                'INVALID_AUTH_STORE'
+            );
+        }
+
+        const store = parsed as AuthStore;
+
+        // If no server provided, require explicit token or fail
+        if (!server) {
+            throw new AuthError(
+                'No server configured. Add server to dfs.config.cjs, pass --server, or provide token via --token.',
+                'NO_SERVER'
+            );
+        }
+
+        // Normalize server URL for consistent lookup
+        const normalizedServer = normalizeServerUrl(server);
+
+        // Look up token by server URL - validate servers is an object, not an array
+        if (!store.servers || typeof store.servers !== 'object' || Array.isArray(store.servers)) {
+            throw new AuthError(
+                'Invalid auth.json format (servers is not an object). Run "dfs auth YOUR_TOKEN" to recreate.',
+                'INVALID_AUTH_STORE'
+            );
+        }
+        const servers = store.servers;
+        const token = servers[normalizedServer];
+        if (!token) {
+            throw new AuthError(
+                `No token found for server "${normalizedServer}". Run "dfs auth YOUR_TOKEN" from your project directory.`,
+                'NO_TOKEN'
+            );
+        }
+
+        return { token };
+    } catch (err) {
+        if (err instanceof AuthError) {
+            throw err;
+        }
+        const serverInfo = server ? ` for server "${normalizeServerUrl(server)}"` : '';
         throw new AuthError(
-            'No authentication token found. Run "dfs auth YOUR_TOKEN" or provide a token.',
+            `No authentication token found${serverInfo}. Run "dfs auth YOUR_TOKEN" or provide a token.`,
             'NO_TOKEN'
         );
     }
 }
 
 /**
- * Save authentication token
+ * Save authentication token for a specific server
+ *
+ * @param token - The API token to save
+ * @param server - Server URL to associate with the token (will be read from config if not provided)
  */
-export async function setAuth(token: string): Promise<void> {
+export async function setAuth(token: string, server?: string): Promise<void> {
     await ensureConfigDir();
 
-    const auth: Auth = { token };
-    await writeFile(AUTH_FILE, JSON.stringify(auth, null, 2));
+    // Require server - either from parameter or from config
+    let targetServer = server;
+    if (!targetServer) {
+        try {
+            targetServer = await getServer();
+        } catch {
+            throw new AuthError(
+                'No server configured. Add server to dfs.config.cjs or pass --server to dfs auth.',
+                'NO_SERVER'
+            );
+        }
+    }
+
+    // Normalize server URL for consistent lookup
+    targetServer = normalizeServerUrl(targetServer);
+
+    // Load existing store or create new one
+    let store: AuthStore = { servers: {} };
+    try {
+        const content = await readFile(AUTH_FILE, 'utf-8');
+        const parsed = JSON.parse(content);
+
+        // Validate parsed shape: must be a non-null object
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            store = parsed as AuthStore;
+        }
+        // If invalid shape (null, array, primitive), fall back to empty store
+    } catch {
+        // File doesn't exist yet, use empty store
+    }
+
+    // Ensure servers object exists (must be a plain object, not an array)
+    if (!store.servers || typeof store.servers !== 'object' || Array.isArray(store.servers)) {
+        store.servers = {};
+    }
+
+    // Save token for this server (rewrite file cleanly without unknown keys)
+    store.servers[targetServer] = token;
+
+    await writeFile(AUTH_FILE, JSON.stringify(store, null, 2));
 }
 
 /**

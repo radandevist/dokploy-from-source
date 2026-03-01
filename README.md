@@ -68,15 +68,20 @@ module.exports = {
 
 ### `dfs auth`
 
-Stores and validates your API token securely in `~/.config/dfs/auth.json`.
+Stores and validates your API token per server in `~/.config/dfs/auth.json`.
 
 ```bash
-# Pass token as argument
+# Pass token as argument (uses server from dfs.config.cjs)
 dfs auth YOUR_TOKEN
+
+# Or specify server explicitly
+dfs auth YOUR_TOKEN --server https://your-dokploy.com
 
 # Or enter interactively
 dfs auth
 ```
+
+Tokens are stored per-server, so you can have different tokens for different Dokploy deployments.
 
 To get your API token:
 1. Go to your Dokploy dashboard
@@ -147,13 +152,23 @@ dfs up api      # uses config.apps.api
 
 ### Auth Storage
 
-Your API token is stored in:
+Tokens are stored per-server in:
 
 ```
 ~/.config/dfs/auth.json
 ```
 
-This keeps your token out of your project files.
+Format:
+```json
+{
+  "servers": {
+    "https://prod.dokploy.com": "token-for-prod",
+    "https://staging.dokploy.com": "token-for-staging"
+  }
+}
+```
+
+This keeps your tokens out of your project files. Each project uses the token matching its configured server.
 
 The CLI uses the `x-api-key` header for authentication (consistent across upload and auth commands).
 

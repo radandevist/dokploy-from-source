@@ -28,6 +28,7 @@ interface UploadArgs {
 
 interface AuthArgs {
     token?: string;
+    server?: string;
 }
 
 /**
@@ -108,12 +109,17 @@ async function main() {
                     .option('token', {
                         describe: 'API token (alternative to positional)',
                         type: 'string',
+                    })
+                    .option('server', {
+                        describe: 'Dokploy server URL (required if not in dfs.config.cjs)',
+                        type: 'string',
                     });
             },
             async (argv) => {
                 const args = argv as AuthArgs;
                 const code = await authCommand({
                     token: args.token,
+                    server: args.server,
                 });
                 exit(code);
             }

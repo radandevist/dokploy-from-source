@@ -5,13 +5,14 @@
  * Uses x-api-key header for consistency with upload.
  */
 
-import { setAuth, loadConfig, getServer } from '../../core/config.js';
+import { setAuth, loadConfig, getServer, normalizeServerUrl } from '../../core/config.js';
 import { fetchWithTimeout } from '../../core/http.js';
 import { success, log, error, warning } from '../output.js';
 import { runCli } from '../run.js';
 
 export interface AuthCliArgs {
     token?: string;
+    server?: string;
 }
 
 /**
@@ -69,7 +70,7 @@ async function askForToken(): Promise<string> {
  * Run the auth command
  */
 export async function runAuth(args: AuthCliArgs): Promise<void> {
-    let { token } = args;
+    let { token, server: serverArg } = args;
 
     // If no token provided, ask interactively
     if (!token) {
@@ -82,39 +83,48 @@ export async function runAuth(args: AuthCliArgs): Promise<void> {
         log('');
         log('Usage:');
         log('  dfs auth YOUR_TOKEN');
+        log('  dfs auth YOUR_TOKEN --server https://dokploy.example.com');
         log('  # or');
         log('  dfs auth            # to enter interactively');
         error('Token is required');
         throw new Error('Token is required');
     }
 
-    // Try to get server from config to validate token
-    let server: string | null = null;
-    try {
-        server = await getServer();
-    } catch {
-        // Server not configured - skip validation
+    // Use server from args, or try to get from config
+    let server: string | null = serverArg || null;
+    if (!server) {
+        try {
+            server = await getServer();
+        } catch {
+            // Server not configured - will be handled by setAuth
+        }
     }
 
     log('Testing token...');
 
     if (server) {
-        const isValid = await validateToken(token, server);
+        const normalizedServer = normalizeServerUrl(server);
+        const isValid = await validateToken(token, normalizedServer);
         if (!isValid) {
-            error('Token validation failed');
+            warning('Token validation failed - still saving token');
             log('The token may be invalid or expired.');
             log('Generate a new one from your Dokploy dashboard.');
-            throw new Error('Token validation failed');
+        } else {
+            success('Token is valid!');
         }
-        success('Token is valid!');
-    } else {
+    } else if (!serverArg) {
         warning('No server configured in dfs.config.cjs - skipping validation');
-        log('Run "dfs init" first to configure your server.');
+        log('Run "dfs init" first or pass --server to dfs auth.');
     }
 
-    // Save the token
-    await setAuth(token);
-    success('Authentication configured!');
+    // Save the token (pass server for per-server storage)
+    await setAuth(token, server || undefined);
+
+    if (server) {
+        success(`Authentication configured for ${normalizeServerUrl(server)}!`);
+    } else {
+        success('Authentication configured!');
+    }
 }
 
 /**
