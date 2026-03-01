@@ -16,8 +16,9 @@ import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { createZipStream, cleanupZip } from './archive.js';
 import { fetchWithTimeout, throwUploadError } from './http.js';
-import { getServer, getAuth, getAppConfig } from './config.js';
+import { getServer, getAuth, getAppConfig, saveBuildType } from './config.js';
 import { UploadError } from './errors.js';
+import type { AppConfigBuildOptions } from './config.js';
 
 export interface UploadArgs {
     /** Local path to upload (file or directory) */
@@ -30,6 +31,8 @@ export interface UploadArgs {
     token?: string;
     /** Override server URL */
     server?: string;
+    /** Build type and related settings to sync to Dokploy */
+    build?: AppConfigBuildOptions;
 }
 
 export interface UploadResult {
@@ -258,7 +261,7 @@ export async function uploadWithConfig(
     pathOrAppName: string,
     args: Partial<UploadArgs> = {}
 ): Promise<UploadResult> {
-    const { path: overridePath, app: overrideAppId, buildPath, token, server } = args;
+    const { path: overridePath, app: overrideAppId, buildPath, token, server, build: overrideBuild } = args;
 
     // Try to find app config by name (treat pathOrAppName as app name)
     const appConfig = await getAppConfig(pathOrAppName);
@@ -266,12 +269,14 @@ export async function uploadWithConfig(
     let resolvedPath: string;
     let appId: string;
     let resolvedBuildPath: string | undefined;
+    let resolvedBuild;
 
     if (appConfig) {
         // Found config by name
         resolvedPath = overridePath || appConfig.localPath;
         appId = overrideAppId || appConfig.appId;
         resolvedBuildPath = buildPath || appConfig.serverBuildPath;
+        resolvedBuild = overrideBuild || appConfig.build;
     } else {
         // Treat as direct path
         if (!overridePath && !pathOrAppName) {
@@ -283,6 +288,14 @@ export async function uploadWithConfig(
         if (!appId) {
             throw new UploadError('app ID is required (provide app name in config or --app argument)', 400, undefined, 'MISSING_APP_ID');
         }
+        resolvedBuild = overrideBuild;
+    }
+ 
+    // Sync build type to Dokploy if configured
+    if (resolvedBuild) {
+        const serverUrl = await getServer(server);
+        const auth = await getAuth(token, serverUrl);
+        await saveBuildType(appId, resolvedBuild, serverUrl, auth.token);
     }
 
     return upload({
@@ -291,5 +304,6 @@ export async function uploadWithConfig(
         buildPath: resolvedBuildPath,
         token,
         server,
+        build: resolvedBuild,
     });
 }

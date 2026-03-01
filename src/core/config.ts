@@ -13,16 +13,85 @@ import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { ConfigError, AuthError } from './errors.js';
+import { fetchWithTimeout, throwUploadError } from './http.js';
 
 export interface Config {
     server: string;
     apps: Record<string, AppConfig>;
 }
 
+export type BuildType = 'dockerfile' | 'heroku_buildpacks' | 'paketo_buildpacks' | 'nixpacks' | 'static' | 'railpack';
+
+const BUILD_TYPES: readonly BuildType[] = [
+    'dockerfile',
+    'heroku_buildpacks',
+    'paketo_buildpacks',
+    'nixpacks',
+    'static',
+    'railpack',
+] as const;
+
+// Allowed keys per build type - used for validation and payload shaping
+const BUILD_TYPE_KEYS: Record<BuildType, readonly string[]> = {
+    dockerfile: ['dockerfile', 'dockerContextPath', 'dockerBuildStage'],
+    heroku_buildpacks: ['herokuVersion'],
+    paketo_buildpacks: [],
+    nixpacks: ['publishDirectory'],
+    static: ['publishDirectory', 'isStaticSpa'],
+    railpack: ['railpackVersion'],
+};
+
+function isBuildType(value: unknown): value is BuildType {
+    return typeof value === 'string' && (BUILD_TYPES as readonly string[]).includes(value);
+}
+
+// Discriminated union for build options - each build type has its own config
+// buildType is REQUIRED when build object is present
+export type AppConfigBuildOptions =
+    | {
+          buildType: 'dockerfile';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+          dockerfile?: string;
+          dockerContextPath?: string;
+          dockerBuildStage?: string | null;
+      }
+    | {
+          buildType: 'heroku_buildpacks';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+          herokuVersion?: string;
+      }
+    | {
+          buildType: 'paketo_buildpacks';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+      }
+    | {
+          buildType: 'nixpacks';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+          publishDirectory?: string | null;
+      }
+    | {
+          buildType: 'static';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+          publishDirectory?: string | null;
+          isStaticSpa?: boolean;
+      }
+    | {
+          buildType: 'railpack';
+          /** Escape hatch for forward compatibility if Dokploy adds new fields */
+          allowUnknownOptions?: boolean;
+          railpackVersion?: string;
+      };
+
 export interface AppConfig {
     appId: string;
     localPath: string;
     serverBuildPath?: string;
+    build?: AppConfigBuildOptions;
 }
 
 export interface Auth {
@@ -180,6 +249,14 @@ export async function getAuth(override?: string, server?: string): Promise<Auth>
         return { token: override || configOverrides.token! };
     }
 
+    // Per-server storage requires a server key for lookup
+    if (!server) {
+        throw new AuthError(
+            'No server configured. Add server to dfs.config.cjs, pass --server, or provide token via --token.',
+            'NO_SERVER'
+        );
+    }
+
     await ensureConfigDir();
 
     try {
@@ -196,14 +273,6 @@ export async function getAuth(override?: string, server?: string): Promise<Auth>
 
         const store = parsed as AuthStore;
 
-        // If no server provided, require explicit token or fail
-        if (!server) {
-            throw new AuthError(
-                'No server configured. Add server to dfs.config.cjs, pass --server, or provide token via --token.',
-                'NO_SERVER'
-            );
-        }
-
         // Normalize server URL for consistent lookup
         const normalizedServer = normalizeServerUrl(server);
 
@@ -215,10 +284,18 @@ export async function getAuth(override?: string, server?: string): Promise<Auth>
             );
         }
         const servers = store.servers;
-        const token = servers[normalizedServer];
+        let token = servers[normalizedServer];
+        if (!token) {
+            for (const [storedServer, storedToken] of Object.entries(servers)) {
+                if (normalizeServerUrl(storedServer) === normalizedServer) {
+                    token = storedToken;
+                    break;
+                }
+            }
+        }
         if (!token) {
             throw new AuthError(
-                `No token found for server "${normalizedServer}". Run "dfs auth YOUR_TOKEN" from your project directory.`,
+                `No token found for server "${normalizedServer}". Run "dfs auth YOUR_TOKEN --server ${normalizedServer}" or run "dfs auth YOUR_TOKEN" from a project with dfs.config.cjs.`,
                 'NO_TOKEN'
             );
         }
@@ -230,7 +307,7 @@ export async function getAuth(override?: string, server?: string): Promise<Auth>
         }
         const serverInfo = server ? ` for server "${normalizeServerUrl(server)}"` : '';
         throw new AuthError(
-            `No authentication token found${serverInfo}. Run "dfs auth YOUR_TOKEN" or provide a token.`,
+            `No authentication token found${serverInfo}. Run "dfs auth YOUR_TOKEN --server ${normalizeServerUrl(server)}" or provide a token via --token.`,
             'NO_TOKEN'
         );
     }
@@ -284,7 +361,8 @@ export async function setAuth(token: string, server?: string): Promise<void> {
     // Save token for this server (rewrite file cleanly without unknown keys)
     store.servers[targetServer] = token;
 
-    await writeFile(AUTH_FILE, JSON.stringify(store, null, 2));
+    const canonicalStore: AuthStore = { servers: store.servers };
+    await writeFile(AUTH_FILE, JSON.stringify(canonicalStore, null, 2));
 }
 
 /**
@@ -297,4 +375,178 @@ export async function getAppConfig(appName: string): Promise<AppConfig | null> {
     }
 
     return config.apps[appName] || null;
+}
+
+/**
+ * Save build type and build-related settings to Dokploy
+ *
+ * @param appId - The application ID
+ * @param build - Build configuration options (buildType is required)
+ * @param server - Server URL
+ * @param token - API token
+ */
+export async function saveBuildType(
+    appId: string,
+    build: AppConfigBuildOptions,
+    server: string,
+    token: string
+): Promise<void> {
+    // Validate appId
+    if (!appId || typeof appId !== 'string' || appId.trim() === '') {
+        throw new ConfigError('appId must be a non-empty string', 'INVALID_APP_ID');
+    }
+
+    // Validate build config at runtime (dfs.config.cjs is untyped)
+    if (!build || typeof build !== 'object') {
+        throw new ConfigError('build must be an object', 'INVALID_BUILD_CONFIG');
+    }
+
+    const rawBuild = build as Record<string, unknown>;
+
+    // Validate buildType first (needed for per-type validation)
+    const rawBuildType = (build as unknown as { buildType?: unknown }).buildType;
+    if (!rawBuildType) {
+        throw new ConfigError('build.buildType is required when build is configured', 'MISSING_BUILD_TYPE');
+    }
+    if (!isBuildType(rawBuildType)) {
+        throw new ConfigError(
+            `Invalid build.buildType: "${String(rawBuildType)}". Expected one of: ${BUILD_TYPES.join(', ')}`,
+            'INVALID_BUILD_TYPE'
+        );
+    }
+    const buildType = rawBuildType;
+
+    // Check for unknown/irrelevant keys per build type
+    const allowUnknownOptionsRaw = rawBuild.allowUnknownOptions;
+    if (allowUnknownOptionsRaw !== undefined && typeof allowUnknownOptionsRaw !== 'boolean') {
+        throw new ConfigError('build.allowUnknownOptions must be a boolean', 'INVALID_BUILD_CONFIG');
+    }
+    const allowUnknownOptions = allowUnknownOptionsRaw === true;
+
+    const allowedKeys = new Set([...BUILD_TYPE_KEYS[buildType], 'buildType', 'allowUnknownOptions']);
+    const unknownKeys = Object.keys(rawBuild).filter((key) => !allowedKeys.has(key));
+    if (!allowUnknownOptions && unknownKeys.length > 0) {
+        const validOptions = [...BUILD_TYPE_KEYS[buildType], 'buildType', 'allowUnknownOptions'].join(', ');
+        throw new ConfigError(
+            `Invalid option(s) for ${buildType}: ${unknownKeys.join(', ')}. Valid options: ${validOptions}`,
+            'INVALID_BUILD_CONFIG'
+        );
+    }
+
+    // Build payload dynamically per build type - only include fields when explicitly provided
+    // Let Dokploy apply its own defaults for omitted fields
+    const json: Record<string, unknown> = {
+        applicationId: appId,
+        buildType,
+    };
+
+    // Type-safe extraction based on discriminated union
+    // Only include fields when explicitly provided by user
+    // Guard against exotic inputs (Proxy/getter returning different values)
+    if ((build as unknown as { buildType?: unknown }).buildType !== buildType) {
+        throw new ConfigError('build.buildType changed during validation', 'INVALID_BUILD_CONFIG');
+    }
+
+    // Use build.buildType for TypeScript narrowing (validated above to equal buildType)
+    switch (build.buildType) {
+        case 'dockerfile':
+            // Read fields once to guard against exotic inputs changing values between checks
+            const dockerfile = build.dockerfile;
+            const dockerContextPath = build.dockerContextPath;
+            const dockerBuildStage = build.dockerBuildStage;
+            if (dockerfile !== undefined && typeof dockerfile !== 'string') {
+                throw new ConfigError('build.dockerfile must be a string', 'INVALID_BUILD_CONFIG');
+            }
+            if (dockerContextPath !== undefined && typeof dockerContextPath !== 'string') {
+                throw new ConfigError('build.dockerContextPath must be a string', 'INVALID_BUILD_CONFIG');
+            }
+            if (
+                dockerBuildStage !== undefined &&
+                dockerBuildStage !== null &&
+                typeof dockerBuildStage !== 'string'
+            ) {
+                throw new ConfigError('build.dockerBuildStage must be a string or null', 'INVALID_BUILD_CONFIG');
+            }
+            if (dockerfile !== undefined) {
+                json.dockerfile = dockerfile;
+            }
+            if (dockerContextPath !== undefined) {
+                json.dockerContextPath = dockerContextPath;
+            }
+            if (dockerBuildStage !== undefined) {
+                json.dockerBuildStage = dockerBuildStage;
+            }
+            break;
+        case 'heroku_buildpacks':
+            const herokuVersion = build.herokuVersion;
+            if (herokuVersion !== undefined && typeof herokuVersion !== 'string') {
+                throw new ConfigError('build.herokuVersion must be a string', 'INVALID_BUILD_CONFIG');
+            }
+            if (herokuVersion !== undefined) {
+                json.herokuVersion = herokuVersion;
+            }
+            break;
+        case 'railpack':
+            const railpackVersion = build.railpackVersion;
+            if (railpackVersion !== undefined && typeof railpackVersion !== 'string') {
+                throw new ConfigError('build.railpackVersion must be a string', 'INVALID_BUILD_CONFIG');
+            }
+            if (railpackVersion !== undefined) {
+                json.railpackVersion = railpackVersion;
+            }
+            break;
+        case 'nixpacks':
+            const publishDirectoryNixpacks = build.publishDirectory;
+            if (
+                publishDirectoryNixpacks !== undefined &&
+                publishDirectoryNixpacks !== null &&
+                typeof publishDirectoryNixpacks !== 'string'
+            ) {
+                throw new ConfigError('build.publishDirectory must be a string or null', 'INVALID_BUILD_CONFIG');
+            }
+            if (publishDirectoryNixpacks !== undefined) {
+                json.publishDirectory = publishDirectoryNixpacks;
+            }
+            break;
+        case 'static':
+            const publishDirectoryStatic = build.publishDirectory;
+            const isStaticSpa = build.isStaticSpa;
+            if (
+                publishDirectoryStatic !== undefined &&
+                publishDirectoryStatic !== null &&
+                typeof publishDirectoryStatic !== 'string'
+            ) {
+                throw new ConfigError('build.publishDirectory must be a string or null', 'INVALID_BUILD_CONFIG');
+            }
+            if (isStaticSpa !== undefined && typeof isStaticSpa !== 'boolean') {
+                throw new ConfigError('build.isStaticSpa must be a boolean', 'INVALID_BUILD_CONFIG');
+            }
+            if (publishDirectoryStatic !== undefined) {
+                json.publishDirectory = publishDirectoryStatic;
+            }
+            if (isStaticSpa !== undefined) {
+                json.isStaticSpa = isStaticSpa;
+            }
+            break;
+        case 'paketo_buildpacks':
+            // No additional options
+            break;
+    }
+
+    const response = await fetchWithTimeout(
+        `${server}/api/trpc/application.saveBuildType`,
+        {
+            method: 'POST',
+            headers: {
+                'x-api-key': token,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ json }),
+            timeout: 30000,
+        }
+    );
+
+    if (!response.ok) {
+        await throwUploadError(response, 'Failed to save build type');
+    }
 }

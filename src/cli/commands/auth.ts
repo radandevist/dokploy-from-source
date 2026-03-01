@@ -5,7 +5,7 @@
  * Uses x-api-key header for consistency with upload.
  */
 
-import { setAuth, loadConfig, getServer, normalizeServerUrl } from '../../core/config.js';
+import { setAuth, getServer, normalizeServerUrl } from '../../core/config.js';
 import { fetchWithTimeout } from '../../core/http.js';
 import { success, log, error, warning } from '../output.js';
 import { runCli } from '../run.js';

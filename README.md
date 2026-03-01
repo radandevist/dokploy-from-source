@@ -150,6 +150,101 @@ dfs up api      # uses config.apps.api
 | `localPath` | string | Local build folder path (default: `./dist`) |
 | `serverBuildPath` | string | Server path where app is served (optional) |
 
+### Build Type Configuration
+
+You can configure the build type in your config. When `build` is specified with a `buildType`, the CLI will automatically sync these settings to Dokploy on each upload.
+
+**Static (SPA):**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'static',
+        publishDirectory: './dist',
+        isStaticSpa: true,  // enables SPA mode (handles client-side routing)
+    },
+},
+```
+
+**Dockerfile:**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'dockerfile',
+        dockerfile: 'Dockerfile',
+        dockerContextPath: '.',
+        dockerBuildStage: 'build',  // optional: for multi-stage builds
+    },
+},
+```
+
+**Nixpacks:**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'nixpacks',
+        publishDirectory: './dist',  // optional: specify output directory
+    },
+},
+```
+
+**Railpack:**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'railpack',
+        railpackVersion: '0.15.4',  // optional: specify version
+    },
+},
+```
+
+**Heroku Buildpacks:**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'heroku_buildpacks',
+        herokuVersion: '24',  // optional: specify builder version
+    },
+},
+```
+
+**Paketo Buildpacks:**
+```javascript
+myapp: {
+    appId: 'YOUR_APP_ID',
+    localPath: './dist',
+    build: {
+        buildType: 'paketo_buildpacks',  // no additional options
+    },
+},
+```
+
+**Build Type Options by Type:**
+
+| Option | dockerfile | heroku | paketo | nixpacks | static | railpack |
+|--------|-----------|--------|--------|----------|--------|----------|
+| `dockerfile` | ✓ | - | - | - | - | - |
+| `dockerContextPath` | ✓ | - | - | - | - | - |
+| `dockerBuildStage` | ✓ | - | - | - | - | - |
+| `herokuVersion` | - | ✓ | - | - | - | - |
+| `railpackVersion` | - | - | - | - | - | ✓ |
+| `publishDirectory` | - | - | - | ✓ | ✓ | - |
+| `isStaticSpa` | - | - | - | - | ✓ | - |
+| `allowUnknownOptions` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**Note:** When `build` is configured, the CLI syncs settings to Dokploy on each `dfs up`. Only explicitly specified options are sent — Dokploy determines how omitted options are handled. If the API call fails, the upload will fail.
+
+By default, the CLI rejects unknown or irrelevant options for the selected `buildType` (to catch typos). If Dokploy adds new build options and you need to proceed before updating this CLI, you can set `allowUnknownOptions: true` to skip unknown-option validation.
+
 ### Auth Storage
 
 Tokens are stored per-server in:

@@ -31,6 +31,13 @@ module.exports = {
 
             // Optional: server build path (where app is served on server)
             // serverBuildPath: '/',
+
+            // Optional: build type (auto-syncs to Dokploy on upload)
+            // build: {
+            //     buildType: 'static',       // dockerfile, heroku_buildpacks, paketo_buildpacks, nixpacks, static, railpack
+            //     publishDirectory: './dist', // for nixpacks/static types
+            //     isStaticSpa: true,          // for static type - enables SPA mode
+            // },
         },
     },
 };
