@@ -9,7 +9,7 @@
   "main": "./dist/api.js",
   "types": "./dist/api.d.ts",
   "bin": {
-    "dfs": "./dist/index.js"
+    "dfs": "dist/index.js"
   },
   "exports": {
     ".": {
