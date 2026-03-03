@@ -16,7 +16,7 @@ import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { createZipStream, cleanupZip } from './archive.js';
 import { fetchWithTimeout, throwUploadError } from './http.js';
-import { getServer, getAuth, getAppConfig, saveBuildType } from './config.js';
+import { getConfig, loadConfig, getServer, getAuth, getAppConfig, saveBuildType } from './config.js';
 import { UploadError } from './errors.js';
 import type { AppConfigBuildOptions } from './config.js';
 
@@ -33,6 +33,12 @@ export interface UploadArgs {
     server?: string;
     /** Build type and related settings to sync to Dokploy */
     build?: AppConfigBuildOptions;
+    /** Request timeout in milliseconds */
+    timeoutMs?: number;
+    /** Max attempts for retryable failures */
+    maxAttempts?: number;
+    /** Base retry delay in milliseconds (multiplied by attempt) */
+    retryDelayMs?: number;
 }
 
 export interface UploadResult {
@@ -98,6 +104,81 @@ function validateUploadParams(appId: string, serverBuildPath?: string): void {
             false
         );
     }
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function toPositiveIntOrFallback(value: unknown, fallback: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+    const v = Math.floor(value);
+    return v > 0 ? v : fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function getUploadDefaults(): Promise<{
+    timeoutMs: number;
+    maxAttempts: number;
+    retryDelayMs: number;
+}> {
+    const overrides = getConfig();
+    const config = await loadConfig();
+
+    const timeoutFromOverrides = overrides.uploadTimeoutMs;
+    const timeoutFromConfig = config?.upload?.timeoutMs;
+
+    const maxAttemptsFromOverrides = overrides.uploadMaxAttempts;
+    const maxAttemptsFromConfig = config?.upload?.maxAttempts;
+
+    const retryDelayFromOverrides = overrides.uploadRetryDelayMs;
+    const retryDelayFromConfig = config?.upload?.retryDelayMs;
+
+    return {
+        timeoutMs: isPositiveFiniteNumber(timeoutFromOverrides)
+            ? timeoutFromOverrides
+            : isPositiveFiniteNumber(timeoutFromConfig)
+              ? timeoutFromConfig
+              : 900000, // 15 minutes
+        maxAttempts: toPositiveIntOrFallback(
+            maxAttemptsFromOverrides ?? maxAttemptsFromConfig,
+            3
+        ),
+        retryDelayMs: toPositiveIntOrFallback(
+            retryDelayFromOverrides ?? retryDelayFromConfig,
+            2000
+        ),
+    };
+}
+
+function isRetryableUploadError(err: unknown): boolean {
+    const anyErr = err as any;
+
+    const statusCode: number | undefined =
+        typeof anyErr?.statusCode === 'number' ? anyErr.statusCode : undefined;
+
+    const code: string =
+        typeof anyErr?.code === 'string' ? anyErr.code : '';
+
+    const message: string =
+        typeof anyErr?.message === 'string' ? anyErr.message : '';
+
+    // 499 is commonly emitted by proxies when requests are closed/time out upstream.
+    // TIMEOUT is thrown by fetchWithTimeout.
+    // Treat common transient gateway statuses as retryable.
+    return (
+        statusCode === 499 ||
+        statusCode === 502 ||
+        statusCode === 503 ||
+        statusCode === 504 ||
+        code === 'TIMEOUT' ||
+        /timed out/i.test(message)
+    );
 }
 
 /**
@@ -181,7 +262,13 @@ function createMultipartStream(
  * @throws {ConfigError} If server is not configured
  */
 export async function upload(args: UploadArgs): Promise<UploadResult> {
-    const { path: localPath, app: appId, buildPath: serverBuildPath, token, server } = args;
+    const {
+        path: localPath,
+        app: appId,
+        buildPath: serverBuildPath,
+        token,
+        server,
+    } = args;
 
     // Validate and sanitize upload parameters
     validateUploadParams(appId, serverBuildPath);
@@ -211,31 +298,62 @@ export async function upload(args: UploadArgs): Promise<UploadResult> {
             filePath = zipPath;
         }
 
-        // Create streaming multipart form data
-        const { boundary, body } = createMultipartStream(
-            appId,
-            filePath,
-            serverBuildPath
-        );
+        const defaults = await getUploadDefaults();
+        const timeoutMs = isPositiveFiniteNumber(args.timeoutMs)
+            ? args.timeoutMs
+            : defaults.timeoutMs;
+        const maxAttempts = toPositiveIntOrFallback(args.maxAttempts, defaults.maxAttempts);
+        const retryDelayMs = toPositiveIntOrFallback(args.retryDelayMs, defaults.retryDelayMs);
 
-        // Make the request with streaming body
-        // duplex: 'half' is required for streaming request bodies in Node.js
-        const response = await fetchWithTimeout(
-            `${serverUrl}/api/trpc/application.dropDeployment`,
-            {
-                method: 'POST',
-                headers: {
-                    'x-api-key': auth.token,
-                    'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                },
-                body,
-                duplex: 'half',
-                timeout: 300000, // 5 minute timeout for large uploads
+        let lastError: unknown = null;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                // Create streaming multipart form data (must be recreated per attempt)
+                const { boundary, body } = createMultipartStream(
+                    appId,
+                    filePath,
+                    serverBuildPath
+                );
+
+                // Make the request with streaming body
+                // duplex: 'half' is required for streaming request bodies in Node.js
+                const response = await fetchWithTimeout(
+                    `${serverUrl}/api/trpc/application.dropDeployment`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'x-api-key': auth.token,
+                            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                        },
+                        body,
+                        duplex: 'half',
+                        timeout: timeoutMs,
+                    }
+                );
+
+                if (!response.ok) {
+                    await throwUploadError(response, 'Upload failed');
+                }
+
+                lastError = null;
+                break;
+            } catch (err) {
+                lastError = err;
+
+                const shouldRetry =
+                    attempt < maxAttempts && isRetryableUploadError(err);
+
+                if (!shouldRetry) {
+                    throw err;
+                }
+
+                await sleep(retryDelayMs * attempt);
             }
-        );
+        }
 
-        if (!response.ok) {
-            await throwUploadError(response, 'Upload failed');
+        if (lastError) {
+            throw lastError;
         }
 
         return {

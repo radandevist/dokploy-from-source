@@ -18,6 +18,18 @@ import { fetchWithTimeout, throwUploadError } from './http.js';
 export interface Config {
     server: string;
     apps: Record<string, AppConfig>;
+    /**
+     * Optional upload defaults (can be overridden per call).
+     * Useful for slow connections / large builds.
+     */
+    upload?: {
+        /** Request timeout in milliseconds (default: 900000 = 15 minutes) */
+        timeoutMs?: number;
+        /** Max attempts for retryable upload failures (default: 3) */
+        maxAttempts?: number;
+        /** Base retry delay in milliseconds (default: 2000; multiplied by attempt) */
+        retryDelayMs?: number;
+    };
 }
 
 export type BuildType = 'dockerfile' | 'heroku_buildpacks' | 'paketo_buildpacks' | 'nixpacks' | 'static' | 'railpack';
@@ -109,6 +121,12 @@ export interface AuthStore {
 export interface ConfigOverrides {
     server?: string;
     token?: string;
+    /** Programmatic default upload timeout (ms). Takes precedence over dfs.config.cjs. */
+    uploadTimeoutMs?: number;
+    /** Programmatic default max attempts. Takes precedence over dfs.config.cjs. */
+    uploadMaxAttempts?: number;
+    /** Programmatic default base retry delay (ms). Takes precedence over dfs.config.cjs. */
+    uploadRetryDelayMs?: number;
 }
 
 const CONFIG_DIR = join(homedir(), '.config', 'dfs');

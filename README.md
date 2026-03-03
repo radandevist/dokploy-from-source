@@ -118,6 +118,13 @@ module.exports = {
     // Your Dokploy server URL
     server: 'https://your-dokploy-server.com',
 
+    // Optional: upload defaults (useful for slow connections / large builds)
+    upload: {
+        timeoutMs: 900000,     // default: 15 minutes
+        maxAttempts: 3,        // default: 3
+        retryDelayMs: 2000,    // default: 2000ms (multiplied by attempt)
+    },
+
     // Your applications
     apps: {
         // Short name -> config
@@ -330,7 +337,10 @@ Set global overrides that take precedence over `dfs.config.cjs` and `auth.json`:
 ```javascript
 configure({
     server: 'https://dokploy.example.com',
-    token: 'your-api-token'
+    token: 'your-api-token',
+    uploadTimeoutMs: 900000,
+    uploadMaxAttempts: 3,
+    uploadRetryDelayMs: 2000,
 });
 ```
 
@@ -382,6 +392,9 @@ await upload({
 | `buildPath` | string | Server build path |
 | `token` | string | API token override |
 | `server` | string | Server URL override |
+| `timeoutMs` | number | Upload request timeout (ms) |
+| `maxAttempts` | number | Max attempts for retryable failures |
+| `retryDelayMs` | number | Base retry delay (ms) multiplied by attempt |
 
 ## Troubleshooting
 
