@@ -1,6 +1,6 @@
 {
   "name": "dokploy-from-source",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "CLI for deploying local builds to Dokploy without Git",
   "type": "module",
   "engines": {
